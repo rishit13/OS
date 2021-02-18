@@ -34,10 +34,10 @@ class Memory_Map
     public:
     void  do_R(int val, int base,int module_size);
     void  do_I(int val);
-    void  do_E(int val, map<int,string> use_list);
+    void  do_E(int val, map<int,string> use_list, vector<int>& visited);
     void  do_A(int val);
     void  print_mem_map();
-    void get_map(char add, int val,map<int,string>use_list,int base,int module_size);
+    void get_map(char add, int val,map<int,string>use_list,int base,int module_size,vector<int>& visited);
     bool check_opcode(int opcode);
     bool check_oprand(int oprand, int module_size);
     bool check_sym(string s);
@@ -54,9 +54,10 @@ class Tokenizer
     char *sep = " \t\r\n";
     char *temp;
     bool flag = true;
+    
     public:
-
     int offset, linenumber = 0;
+    int prev_length;
     char* getTok();
     int readInt();
     char* readSymbol();
@@ -64,13 +65,12 @@ class Tokenizer
     void parseerror(int eno);
     void check_def(int val);
     void check_use(int val);
-    
 };
 
 int Tokenizer::readInt()
-{   if(file.eof() && temp == NULL)
-    {
-        printf("Parse Error line %d offset %d: NUM_EXPECTED\n", linenumber, offset + sizeof(temp)+1);
+{   if(file.eof() && word == NULL)
+    {   int n = offset + prev_length+1;
+        printf("Parse Error line %d offset %d: NUM_EXPECTED\n", linenumber, n);
         exit(0);
     }
     
@@ -87,25 +87,24 @@ int Tokenizer::readInt()
             return value;
         }
 }
-
 char* Tokenizer::readSymbol()
-{   if(file.eof() && temp == NULL)
-    {
-        printf("Parse Error line %d offset %d: SYM_EXPECTED\n", linenumber, offset + sizeof(temp)+1);
+{   if(file.eof() && word == NULL)
+    {   int n = offset + prev_length+1;
+        printf("Parse Error line %d offset %d: SYM_EXPECTED\n", linenumber, n);
         exit(0);
     }
     
     char *s = getTok();
     int count = 0;
     if(!isalpha(s[0]))
-    {   cout<<s;
+    {
         parseerror(1);
         exit(0);
     }
     for(int i =1;s[i] !='\0'; i++)
     {   
         if(!isalnum(s[i]))
-        {   cout<<"a";
+        {   
             parseerror(1);
             exit(0);
         }
@@ -125,9 +124,9 @@ char* Tokenizer::readSymbol()
 char Tokenizer::readIEAR()
 {   char c;
     int count  =0;
-    if(file.eof() && temp == NULL)
-    {
-        printf("Parse Error line %d offset %d: ADDR_EXPECTED\n", linenumber, offset + sizeof(temp)+1);
+    if(file.eof() && word == NULL)
+    {   int n = offset + prev_length+1;
+        printf("Parse Error line %d offset %d: ADDR_EXPECTED\n", linenumber, n);
         exit(0);
     }
     char *s = getTok();
@@ -153,22 +152,22 @@ char Tokenizer::readIEAR()
                 return s[i];
             }
         }
-        
     }
 }
 char* Tokenizer::getTok()
 {   if(flag == true)
     {
-    if (getline(file, test, '\n'))
+    while (getline(file, test, '\n') && test.empty())
         {
             linenumber++;
-            strcpy(input, test.c_str());
-            flag = false;
-            word = strtok(input,sep);
         }
+        linenumber++;
+        strcpy(input, test.c_str());
+        flag = false;
+        word = strtok(input,sep);
     }
-     
-     temp = word;
+    temp = word;
+    prev_length = strlen(temp);
     offset = word - input;
     word = strtok(NULL,sep);
     if(word == NULL)
@@ -214,7 +213,6 @@ bool Memory_Map::check_opcode(int opcode)
     }
     return true;
 }
-
 bool Memory_Map::check_oprand(int oprand, int module_size)
 {
     if(oprand > module_size)
@@ -253,7 +251,6 @@ bool Memory_Map::check_I(int val)
     }
     return true;
 }
-
 void Memory_Map:: do_I(int val)
 {
     if (!check_I(val))
@@ -265,7 +262,7 @@ bool Memory_Map::check_uselist(int n, int oprand)
 {
     if(oprand > n)
     {
-        err_map[count] = 5;
+        err_map[count] = 6;
         return false;
     }
     return true;
@@ -281,12 +278,13 @@ bool Memory_Map::check_in_def(string sym)
     }
     return true;
 }
-void Memory_Map:: do_E(int val, map<int,string> use_list)
+void Memory_Map:: do_E(int val, map<int,string> use_list,vector<int>& visited)
 {
     int opcode =val/1000;
     if (!check_opcode(opcode))
     {
          val = 9999;
+         visited.push_back(val%1000);
          print_map[count++] = val;
     }
     else
@@ -300,16 +298,17 @@ void Memory_Map:: do_E(int val, map<int,string> use_list)
         {
             val = 0;
             print_map[count++] = val;
+            visited.push_back(oprand);
         }
         else
         {
             int off_set_add = symbol_table[use_list[oprand]];
             int add_val = opcode*1000 + off_set_add;
             print_map[count++] = add_val;
+            visited.push_back(oprand);
         }
     }
 }
-
 bool Memory_Map::check_mem_size(int oprand)
 {
     if(oprand >= 512)
@@ -319,7 +318,6 @@ bool Memory_Map::check_mem_size(int oprand)
     }
     return true;
 }
-
 void Memory_Map:: do_A(int val)
 {
         int opcode = val/1000;
@@ -369,18 +367,17 @@ void Memory_Map:: print_mem_map()
     }
 
 }
-void Memory_Map:: get_map(char add, int val,map<int,string>use_list,int base,int module_size)
+void Memory_Map:: get_map(char add, int val,map<int,string>use_list,int base,int module_size,vector<int>& visited)
 {   
     if(add == 'R')
         do_R(val,base,module_size);
     if(add == 'I')
         do_I(val);
     if(add == 'E')
-        do_E(val,use_list);
+        do_E(val,use_list,visited);
     if(add == 'A')
         do_A(val);
 }
-
 void storesym(string sym , int value)
 {
     if(symbol_table.find(sym) == symbol_table.end())
@@ -388,7 +385,6 @@ void storesym(string sym , int value)
         symbol_table[sym] = value;
     }
 }
-
 void print_sym_table()
 {   cout<< "Symbol Table"<<"\n";
     for(auto const& it : symbol_table)
@@ -409,9 +405,52 @@ bool check_sym(string s)
         
     return false;
 }
+
+void check_def_use_pre(int m_id, vector<pair<string,int> >def_values,int module_size)
+{
+    int length = def_values.size();
+    for(int i =0;i<length;i++)
+    {
+        if (def_values[i].second > module_size)
+        {   string sym  = def_values[i].first;
+            int old_value = symbol_table[def_values[i].first];
+            int new_value = symbol_table[def_values[i].first] - def_values[i].second;
+            symbol_table[def_values[i].first] = new_value;
+            printf("Warning: Module %d: %s too big %d (max=%d) assume zero relative\n", m_id,sym.c_str(),old_value,module_size);
+        }
+    }
+}
+
+void check_isfallin_use(int id, vector<int> visited, map<int, string> use_index,map<string,int>& global)
+{
+    int n = visited.size();
+    for(int i =0;i<n;i++)
+    {   
+        if(use_index.find(visited[i]) == use_index.end())
+        {   
+            string s = use_index[visited[i]];
+            global[s]++;
+            printf("Warning: Module %d: %s appeared in the uselist but was not actually used\n",id,s.c_str());
+        }
+    }
+}
+
+void check_not_used_def( map<string,int> global_visited, map<string,int> def_module)
+{  
+    for( auto x: symbol_table)
+    {
+        if(global_visited.find(x.first) != global_visited.end())
+        {   string s = x.first;
+            printf("Warning: Module %d: %s was defined but never used\n",def_module[x.first],s.c_str() );
+        }
+    }
+}
+
 void pass_1()
 {   Tokenizer tokenizer;
     Module module;
+    vector<pair<string,int> > def_list_values;
+    int module_size;
     while(!file.eof())
     {   
         int defcount = tokenizer.readInt();
@@ -423,8 +462,10 @@ void pass_1()
             int value_offset = tokenizer.readInt();
             int address = module.base_address + value_offset;
             if(!check_sym(s))
-                storesym(s, address);
-            //cout<< "deflist "<<sym<<":"<<address<<"\n";
+                {   
+                    def_list_values.push_back(make_pair(s,value_offset));
+                    storesym(s, address);
+                }  
         }
         int usecount = tokenizer.readInt();
         tokenizer.check_use(usecount);
@@ -441,12 +482,14 @@ void pass_1()
             tokenizer.parseerror(6);
             exit(0);
         }  
+        module_size = icount;
         for(int i=0;i<icount;i++)
         {
             char add = tokenizer.readIEAR();
             int val = tokenizer.readInt();
             //cout<< "inlist "<<add<<":"<<val<<"\n";
         }
+        check_def_use_pre(module.id, def_list_values, module_size);
         if(!file.eof())
             module.id++;
     }
@@ -455,57 +498,62 @@ void pass_1()
 }
 
 void pass_2()
-{   Tokenizer tokenizer;
+{   Tokenizer tokenizer1;
     Module module;
     Memory_Map mmap;
+    map<string,int>global_visited;
+    map<string,int> def_mod;
     while(!file.eof())
-    {   map<int,string> use_index;
-        int defcount = tokenizer.readInt();
-        tokenizer.check_def(defcount);
+    {   vector<int> visited;
+        map<int,string> use_index;
+        int defcount = tokenizer1.readInt();
+        tokenizer1.check_def(defcount);
         for(int i=0;i<defcount;i++)
         {
-            char* sym = tokenizer.readSymbol();
+            char* sym = tokenizer1.readSymbol();
             string s = sym;
-            int value_offset = tokenizer.readInt();
-            int address = module.base_address + value_offset;
-            
+            int value_offset = tokenizer1.readInt();
+            int address = module.base_address + value_offset; 
+            def_mod[s] = module.id;
         }
-        int usecount = tokenizer.readInt();
-        tokenizer.check_use(usecount);
+        int usecount = tokenizer1.readInt();
+        tokenizer1.check_use(usecount);
         for(int i=0;i<usecount;i++)
         {
-            char* sym = tokenizer.readSymbol();
+            char* sym = tokenizer1.readSymbol();
             string s = sym;
             use_index[i] = sym; //add to the list
             //cout<< "uselist "<<sym<<"\n";
         }
-        int icount = tokenizer.readInt();
+        int icount = tokenizer1.readInt();
         module.instruction_count += icount;
         if(module.instruction_count  >= 512)
         {
-            tokenizer.parseerror(6);
+            tokenizer1.parseerror(6);
             exit(0);
         }  
         for(int i=0;i<icount;i++)
         {
-            char add = tokenizer.readIEAR();
-            int val = tokenizer.readInt();
-            mmap.get_map(add, val,use_index,module.base_address,icount);
+            char add = tokenizer1.readIEAR();
+            int val = tokenizer1.readInt();
+            mmap.get_map(add, val,use_index,module.base_address,icount,visited);
             //cout<< "inlist "<<add<<":"<<val<<"\n";
         }
         module.base_address += icount;
+        check_isfallin_use(module.id,visited,use_index,global_visited);
         if(!file.eof())
             module.id++;
     }
+
     mmap.print_mem_map();
+    check_not_used_def(global_visited,def_mod);
     file.close();
 }
-
 int main()
 {   
-    file.open("test-3.txt");
+    file.open("input12.txt");
     pass_1();
-    file.open("test-3.txt");
+    file.open("input12.txt");
     pass_2();
     return 0;
 }
